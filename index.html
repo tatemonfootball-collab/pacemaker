@@ -123,6 +123,26 @@
     .nav-item { flex:1; text-align:center; font-size:12px; font-weight:700; color:var(--sub); cursor:pointer; padding:6px 0; }
     .nav-item.active { color:var(--primary); }
 
+    .slot-chip { cursor:pointer; }
+    .slot-hint { font-size:10px; color:#94a3b8; margin-top:2px; }
+    .sheet-bg { position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:90; display:none; align-items:flex-end; justify-content:center; }
+    .sheet { background:#fff; width:100%; max-width:520px; border-radius:18px 18px 0 0; padding:18px 16px calc(18px + env(safe-area-inset-bottom)); max-height:90vh; overflow:auto; }
+    @media (min-width:600px) { .sheet-bg { align-items:center; } .sheet { border-radius:18px; } }
+    .sheet h3 { margin:0 0 12px 0; font-size:16px; }
+    .btn-row { display:flex; gap:8px; margin-top:10px; }
+    .btn-row > button { flex:1; margin-top:0; }
+    .btn-danger { background:#fef2f2; color:#dc2626; border:1px solid #fecaca; padding:12px; border-radius:12px; font-size:14px; font-weight:700; cursor:pointer; }
+    .q-card { border-left:6px solid #7c3aed; }
+    .q-about { font-size:11px; color:#6d28d9; font-weight:700; background:#f5f3ff; padding:3px 9px; border-radius:999px; display:inline-block; }
+    .q-text { font-size:16px; font-weight:800; line-height:1.55; margin:8px 0 10px; word-break:break-word; }
+    .q-wait { font-size:13px; color:var(--sub); font-weight:600; }
+    .log-item { display:flex; gap:10px; padding:9px 0; border-bottom:1px solid #f1f5f9; cursor:pointer; align-items:center; }
+    .log-item:last-child { border-bottom:none; }
+    .log-time { font-size:12px; font-weight:800; color:#0f766e; min-width:96px; white-space:nowrap; }
+    .log-live { color:#dc2626; animation:pulse 1.6s infinite; }
+    .log-sum { display:flex; gap:5px; flex-wrap:wrap; margin:10px 0 4px; }
+    .date-nav { display:flex; align-items:center; gap:6px; font-size:12px; font-weight:800; color:var(--sub); }
+
     .overlay { position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:100; display:flex; align-items:center; justify-content:center; padding:16px; overflow:auto; }
     .setup-card { background:#fff; border-radius:18px; padding:20px; max-width:480px; width:100%; }
     .setup-card h2 { margin:0 0 8px 0; font-size:18px; color:var(--primary); }
@@ -163,7 +183,7 @@
         <div class="card">
           <div class="section-title">
             <span>📅 今日の予定と空き時間 (8:00〜19:00)</span>
-            <span style="font-size:11px; color:#059669; font-weight:600;">🟢＝空きコマ</span>
+            <span style="font-size:11px; color:#059669; font-weight:600;">タップで修正・追加</span>
           </div>
           <div id="timelineContainer" class="timeline-scroll"></div>
         </div>
@@ -171,7 +191,7 @@
         <div class="card">
           <div class="input-row">
             <textarea id="voiceText" rows="2" placeholder="🎙️ 話す・書く（例：毎週月曜8時半に朝礼資料の確認。明日15時半から進路指導部と会議…）"></textarea>
-            <button id="micBtn" class="btn-mic" onclick="toggleMic()" title="音声入力">🎙️</button>
+            <button id="micBtn" class="btn-mic" onclick="toggleMic('voiceText','micBtn')" title="音声入力">🎙️</button>
           </div>
           <button id="sendBtn" class="btn-send" onclick="submitVoice()">✨ AIでタスク・予定・記録に自動仕分け</button>
         </div>
@@ -190,6 +210,43 @@
       </div>
 
       <div>
+        <!-- AIからの問いかけ -->
+        <div class="card q-card">
+          <div class="section-title">
+            <span>💬 AIからの問いかけ</span>
+            <button id="aiqNewBtn" class="btn-j-action" onclick="newQuestion(false)">🔄 別の質問</button>
+          </div>
+          <span id="aiqAbout" class="q-about" style="display:none;"></span>
+          <div id="aiqText" class="q-text"></div>
+          <div id="aiqAnswerArea" style="display:none;">
+            <div class="input-row">
+              <textarea id="aiqAnswer" rows="2" placeholder="話す・書くで答える（ジャーナルに記録されます）"></textarea>
+              <button id="aiqMic" class="btn-mic" onclick="toggleMic('aiqAnswer','aiqMic')" title="音声入力">🎙️</button>
+            </div>
+            <button class="btn-send" style="background:#7c3aed;" onclick="answerQuestion()">💬 答えて記録する</button>
+          </div>
+        </div>
+
+        <!-- 行動記録 -->
+        <div class="card">
+          <div class="section-title">
+            <span>🕒 行動記録</span>
+            <div class="date-nav">
+              <button class="btn-j-action" onclick="shiftLogDate(-1)">◀</button>
+              <span id="logDateLabel">今日</span>
+              <button id="logNextBtn" class="btn-j-action" onclick="shiftLogDate(1)">▶</button>
+            </div>
+          </div>
+          <div class="input-row">
+            <textarea id="logInput" rows="1" placeholder="例：10時から3組の採点した／今から部活"></textarea>
+            <button id="logMic" class="btn-mic" onclick="toggleMic('logInput','logMic')" title="音声入力">🎙️</button>
+          </div>
+          <button id="logBtn" class="btn-send" style="background:#0f766e;" onclick="submitLog()">🕒 AIで行動を記録</button>
+          <div id="logSummary"></div>
+          <div id="logList"></div>
+          <button class="btn-sub" onclick="openLogSheet('')">＋ 手で追加</button>
+        </div>
+
         <details open>
           <summary>🗂️ 手持ちのタスク全体（タップで調整）</summary>
           <div class="quick-add">
@@ -314,7 +371,7 @@
         </div>
         <input type="file" id="importFile" accept=".json,application/json" style="display:none;" onchange="importFile(this)">
         <div class="hint" style="margin-top:6px;">「取り込み」はGAS版からの移行ファイル（pacemaker-export.json）やバックアップを読み込めます。</div>
-        <div class="hint" style="margin-top:10px; text-align:right;">AI PaceMaker v4.0</div>
+        <div class="hint" style="margin-top:10px; text-align:right;">AI PaceMaker v4.1</div>
       </div>
     </div>
   </div>
@@ -323,6 +380,11 @@
     <div class="nav-item active" id="navHome" onclick="switchTab('home')">🎯 今やること</div>
     <div class="nav-item" id="navJournal" onclick="switchTab('journal')">📖 ジャーナル</div>
     <div class="nav-item" id="navConfig" onclick="switchTab('config')">🏫 予定・設定</div>
+  </div>
+
+  <!-- 下から出る編集シート -->
+  <div id="sheetBg" class="sheet-bg" onclick="if(event.target===this)closeSheet()">
+    <div class="sheet" id="sheetBody"></div>
   </div>
 
   <!-- 初期設定 -->
@@ -411,7 +473,7 @@ function showToast(msg, isErr) {
 // =====================================================
 function emptyDB() {
   return {
-    version: 1, tasks: [], journals: [],
+    version: 1, tasks: [], journals: [], logs: [], aiQ: null,
     memory: { profile: DEFAULT_PROFILE, learned: '特になし', learnedAt: 0, updatedAt: 0 },
     timetable: { patterns: JSON.parse(JSON.stringify(DEFAULT_TT)), updatedAt: 0 },
     settings: { claudeKey: '', claudeModel: DEFAULT_MODEL, updatedAt: 0 }
@@ -424,6 +486,8 @@ function normalizeDB(d) {
     version: 1,
     tasks: Array.isArray(d.tasks) ? d.tasks : [],
     journals: Array.isArray(d.journals) ? d.journals : [],
+    logs: Array.isArray(d.logs) ? d.logs : [],
+    aiQ: d.aiQ || null,
     memory: d.memory || e.memory,
     timetable: d.timetable && d.timetable.patterns ? d.timetable : e.timetable,
     settings: d.settings || e.settings
@@ -451,6 +515,8 @@ function mergeDB(l, r) {
     version: 1,
     tasks: mergeList(l.tasks, r.tasks),
     journals: mergeList(l.journals, r.journals),
+    logs: mergeList(l.logs, r.logs),
+    aiQ: mergeObj(l.aiQ, r.aiQ),
     memory: mergeObj(l.memory, r.memory),
     timetable: mergeObj(l.timetable, r.timetable),
     settings: mergeObj(l.settings, r.settings)
@@ -750,7 +816,7 @@ async function loadTimeline() {
   const r = await gapi(`${CAL_BASE}?timeMin=${encodeURIComponent(d0.toISOString())}&timeMax=${encodeURIComponent(d1.toISOString())}&singleEvents=true&orderBy=startTime&maxResults=100`);
   const evs = ((r && r.items) || [])
     .filter(ev => ev.status !== 'cancelled' && ev.start && ev.start.dateTime && ev.end && ev.end.dateTime)
-    .map(ev => ({ title: ev.summary || '（無題）', s: new Date(ev.start.dateTime), e: new Date(ev.end.dateTime) }))
+    .map(ev => ({ id: ev.id, link: ev.htmlLink || '', recurring: !!ev.recurringEventId, title: ev.summary || '（無題）', s: new Date(ev.start.dateTime), e: new Date(ev.end.dateTime) }))
     .sort((a, b) => a.s - b.s);
   const startOfDay = new Date(d0); startOfDay.setHours(8);
   const endOfDay = new Date(d0); endOfDay.setHours(19);
@@ -762,7 +828,7 @@ async function loadTimeline() {
   };
   evs.forEach(ev => {
     if (ev.s.getTime() > ptr) free(ptr, Math.min(ev.s.getTime(), Math.max(ptr, endOfDay.getTime())));
-    items.push({ type: 'busy', title: ev.title, startStr: hm(ev.s), endStr: hm(ev.e), min: Math.round((ev.e - ev.s) / 60000) });
+    items.push({ type: 'busy', id: ev.id, link: ev.link, recurring: ev.recurring, title: ev.title, startStr: hm(ev.s), endStr: hm(ev.e), min: Math.round((ev.e - ev.s) / 60000) });
     if (ev.e.getTime() > ptr) ptr = ev.e.getTime();
   });
   if (endOfDay.getTime() > ptr) free(ptr, endOfDay.getTime());
@@ -771,6 +837,11 @@ async function loadTimeline() {
 }
 async function createCalEvent(title, start, end) {
   return gapi(CAL_BASE, { method: 'POST', body: JSON.stringify({ summary: title, start: { dateTime: start.toISOString() }, end: { dateTime: end.toISOString() } }) });
+}
+const patchCalEvent = (id, body) => gapi(`${CAL_BASE}/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) });
+async function deleteCalEvent(id) {
+  try { await gapi(`${CAL_BASE}/${encodeURIComponent(id)}`, { method: 'DELETE' }); }
+  catch (e) { if (e.status !== 404 && e.status !== 410) throw e; }
 }
 function requireGoogle() {
   if (!hasToken()) { showToast('Googleに接続してください', true); updateConnUI(); return false; }
@@ -801,6 +872,7 @@ async function runSync(full) {
     await drivePush();
     if (full) { try { await loadTimeline(); } catch (e) { console.warn('カレンダー取得エラー', e); } lastFullSync = Date.now(); }
     setStatus('ok');
+    if (full) setTimeout(maybeAutoQuestion, 500);
   } catch (e) {
     console.error(e);
     if (e.auth) { setStatus('auth'); updateConnUI(); } else { setStatus('error'); }
@@ -894,6 +966,8 @@ function render() {
   renderTopTask();
   renderMatrix();
   renderCompleted();
+  renderQuestion();
+  renderLogs();
   renderJournals();
   renderConfig();
 }
@@ -901,17 +975,22 @@ function render() {
 function renderTimeline() {
   const c = $('timelineContainer');
   if (!timeline.length) {
-    c.innerHTML = `<div style="font-size:12px; color:#64748b;">${hasToken() ? '今日の予定はまだありません' : 'Googleに接続すると今日の予定が表示されます'}</div>`;
+    c.dataset.html = '';
+    c.innerHTML =`<div style="font-size:12px; color:#64748b;">${hasToken() ? '今日の予定はまだありません' : 'Googleに接続すると今日の予定が表示されます'}</div>`;
     return;
   }
   const now = hm(new Date());
-  c.innerHTML = timeline.map(it => {
+  const html = timeline.map((it, idx) => {
     const cur = now >= it.startStr && now < it.endStr;
-    return `<div class="slot-chip ${it.type === 'free' ? 'free' : ''} ${cur ? 'current' : ''}">
+    return `<div class="slot-chip ${it.type === 'free' ? 'free' : ''} ${cur ? 'current' : ''}" onclick="openTimelineItem(${idx})">
       <div class="slot-time">${esc(it.startStr)}〜${esc(it.endStr)}</div>
-      <div style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc(it.title)}</div></div>`;
+      <div style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc(it.title)}</div>
+      <div class="slot-hint">${it.type === 'free' ? '＋ 予定を入れる' : '✏️ 修正'}</div></div>`;
   }).join('');
-  // 今の時間帯のコマが見えるように横スクロール
+  if (c.dataset.html === html) return;
+  c.innerHTML = html;
+  c.dataset.html = html;
+  // 今の時間帯のコマが見えるように横スクロール（内容が変わったときだけ）
   const cur = c.querySelector('.slot-chip.current');
   if (cur) c.scrollLeft = Math.max(0, cur.offsetLeft - c.offsetLeft - 8);
 }
@@ -1155,21 +1234,22 @@ function deleteCompleted(id) {
 
 // ---- 音声・AI仕分け ----
 let rec = null;
-function toggleMic() {
+function toggleMic(targetId, btnId) {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) { showToast('この端末ではキーボードのマイクボタンで音声入力してください', true); $('voiceText').focus(); return; }
+  if (!SR) { showToast('この端末ではキーボードのマイクボタンで音声入力してください', true); $(targetId).focus(); return; }
   if (rec) { rec.stop(); return; }
-  rec = new SR();
-  rec.lang = 'ja-JP'; rec.interimResults = true; rec.continuous = true;
-  const base = $('voiceText').value;
-  rec.onresult = e => {
+  const r = new SR();
+  rec = r;
+  r.lang = 'ja-JP'; r.interimResults = true; r.continuous = true;
+  const base = $(targetId).value;
+  r.onresult = e => {
     let s = '';
     for (let i = 0; i < e.results.length; i++) s += e.results[i][0].transcript;
-    $('voiceText').value = (base ? base + ' ' : '') + s;
+    $(targetId).value = (base ? base + ' ' : '') + s;
   };
-  rec.onerror = e => { if (e.error !== 'no-speech' && e.error !== 'aborted') showToast('音声入力エラー: ' + e.error, true); };
-  rec.onend = () => { rec = null; $('micBtn').classList.remove('rec'); };
-  try { rec.start(); $('micBtn').classList.add('rec'); } catch (e) { rec = null; }
+  r.onerror = e => { if (e.error !== 'no-speech' && e.error !== 'aborted') showToast('音声入力エラー: ' + e.error, true); };
+  r.onend = () => { if (rec === r) rec = null; $(btnId).classList.remove('rec'); };
+  try { r.start(); $(btnId).classList.add('rec'); } catch (e) { rec = null; }
 }
 
 async function submitVoice() {
@@ -1197,9 +1277,12 @@ async function submitVoice() {
    - execTime: 実行時刻の指定があれば "HH:mm"、なければ ""
 3. events: 会議・来客・出張・面談など「日時が明確に決まっている予定」の配列
    - title, startTime, endTime（ISO形式 例: 2026-10-25T15:30:00+09:00。終了不明なら開始の1時間後）
+4. logs: 「実際にやった・今やっている行動」の行動記録の配列（これからの予定はeventsへ、やるべきことはtasksへ）
+${LOG_RULES}
+   行動記録にした内容はjournalに重複させない（感想や気づきがあればjournalへ）。
 
 【出力JSONフォーマット（厳守・JSON以外は書かない）】
-{"journal":{"content":"","tags":["#タグ"]},"tasks":[{"title":"","category":"#教務","importance":4,"urgency":5,"duration":30,"deadline":"","recurrence":"","execTime":""}],"events":[{"title":"","startTime":"","endTime":""}],"aiMessage":"整理して登録しました！（2文以内）"}
+{"journal":{"content":"","tags":["#タグ"]},"tasks":[{"title":"","category":"#教務","importance":4,"urgency":5,"duration":30,"deadline":"","recurrence":"","execTime":""}],"events":[{"title":"","startTime":"","endTime":""}],"logs":[{"date":"","start":"","end":"","text":"","category":""}],"aiMessage":"整理して登録しました！（2文以内）"}
 
 【入力テキスト】
 ${text}`;
@@ -1230,10 +1313,11 @@ ${text}`;
       if (!hasToken()) { evFail++; continue; }
       try { await createCalEvent(ev.title || '予定', s, end); evCount++; } catch (err) { evFail++; console.warn(err); }
     }
+    const logCount = addLogs(out.logs);
     textEl.value = '';
     const box = $('aiReplyBox');
     box.style.display = 'block';
-    box.textContent = `🤖 ${out.aiMessage || '登録しました！'}\n（タスク ${tasks.length}件 / カレンダー ${evCount}件${evFail ? ` / 未登録 ${evFail}件（Google未接続）` : ''}）`;
+    box.textContent = `🤖 ${out.aiMessage || '登録しました！'}\n（タスク ${tasks.length}件 / カレンダー ${evCount}件${logCount ? ` / 行動記録 ${logCount}件` : ''}${evFail ? ` / 未登録 ${evFail}件（Google未接続）` : ''}）`;
     setTimeout(() => { box.style.display = 'none'; }, 6000);
     commit();
     if (evCount && hasToken()) loadTimeline().then(renderTimeline).catch(() => {});
@@ -1263,6 +1347,8 @@ async function askAI() {
 今の状況: ${cur ? (cur.type === 'free' ? `空き時間（${cur.endStr}まで）` : `予定中「${cur.title}」（${cur.endStr}まで）`) : '勤務時間外または不明'}
 今日の予定:
 ${tl}
+今日の行動記録:
+${logLines(todayStr()) || '（まだなし）'}
 
 タスク一覧(JSON):
 ${JSON.stringify(list)}
@@ -1280,6 +1366,336 @@ ${JSON.stringify(list)}
     c.innerHTML = prevHtml;
     showToast(e.message, true);
   }
+}
+
+// =====================================================
+// 編集シート（下から出る小窓）
+// =====================================================
+function openSheet(html) { $('sheetBody').innerHTML = html; $('sheetBg').style.display = 'flex'; }
+function closeSheet() { $('sheetBg').style.display = 'none'; $('sheetBody').innerHTML = ''; }
+const titleDatalist = () => `<datalist id="evTitleList">${[...EVENT_PRESETS, ...TITLE_PRESETS].map(p => `<option value="${esc(p)}">`).join('')}</datalist>`;
+
+// =====================================================
+// 今日の予定の修正
+// =====================================================
+function openTimelineItem(idx) {
+  const it = timeline[idx];
+  if (!it) return;
+  if (it.type === 'free') {
+    openSheet(`
+      <h3>🟢 空き時間 ${esc(it.startStr)}〜${esc(it.endStr)}（${it.min}分）</h3>
+      <div class="form-row"><label>予定を入れる</label><input type="text" id="evTitle" list="evTitleList" placeholder="例：打ち合わせ、生徒面談">${titleDatalist()}</div>
+      <div style="display:flex; gap:8px;">
+        <div class="form-row" style="flex:1;"><label>開始</label><input type="time" id="evStart" value="${esc(it.startStr)}"></div>
+        <div class="form-row" style="flex:1;"><label>終了</label><input type="time" id="evEnd" value="${esc(it.endStr)}"></div>
+      </div>
+      <button class="btn-send" onclick="addEventFromSheet()">📅 予定として登録</button>
+      <button class="btn-sub" onclick="closeSheet();setMode('quick');document.getElementById('topTaskContainer').scrollIntoView({behavior:'smooth',block:'center'});">⚡ このスキマでできるタスクを見る</button>
+      <button class="btn-sub" onclick="closeSheet()">閉じる</button>`);
+    return;
+  }
+  if (!it.id) { showToast('🔄 同期してからもう一度タップしてください', true); return; }
+  openSheet(`
+    <h3>✏️ 予定を修正</h3>
+    <div class="form-row"><label>タイトル</label><input type="text" id="evTitle" list="evTitleList" value="${esc(it.title)}">${titleDatalist()}</div>
+    <div style="display:flex; gap:8px;">
+      <div class="form-row" style="flex:1;"><label>開始</label><input type="time" id="evStart" value="${esc(it.startStr)}"></div>
+      <div class="form-row" style="flex:1;"><label>終了</label><input type="time" id="evEnd" value="${esc(it.endStr)}"></div>
+    </div>
+    ${it.recurring ? '<div class="hint" style="margin-bottom:8px;">🔁 繰り返し予定です。変更・削除は今日の分だけに反映されます。</div>' : ''}
+    <button class="btn-send" onclick="saveEventFromSheet(${idx})">✓ 保存</button>
+    <div class="btn-row">
+      <button class="btn-danger" onclick="deleteEventFromSheet(${idx})">🗑️ 削除</button>
+      <button class="btn-sub" onclick="closeSheet()">閉じる</button>
+    </div>
+    ${it.link ? `<div style="text-align:center; margin-top:10px;"><a href="${esc(it.link)}" target="_blank" rel="noopener" class="hint">Googleカレンダーで詳しく編集 ↗</a></div>` : ''}`);
+}
+function readEventSheet() {
+  const title = $('evTitle').value.trim(), s = $('evStart').value, e = $('evEnd').value;
+  if (!title || !s || !e) { alert('タイトルと時刻を入力してください'); return null; }
+  if (e <= s) { alert('終了時刻は開始時刻より後にしてください'); return null; }
+  const d = todayStr();
+  return { title, start: new Date(`${d}T${s}`), end: new Date(`${d}T${e}`) };
+}
+const refreshTimeline = () => loadTimeline().then(renderTimeline).catch(() => {});
+async function addEventFromSheet() {
+  if (!requireGoogle()) return;
+  const v = readEventSheet(); if (!v) return;
+  try { await createCalEvent(v.title, v.start, v.end); closeSheet(); showToast('✓ 予定を登録しました'); refreshTimeline(); }
+  catch (e) { showToast('登録できませんでした: ' + e.message, true); }
+}
+async function saveEventFromSheet(idx) {
+  if (!requireGoogle()) return;
+  const it = timeline[idx]; const v = readEventSheet(); if (!it || !v) return;
+  try {
+    await patchCalEvent(it.id, { summary: v.title, start: { dateTime: v.start.toISOString() }, end: { dateTime: v.end.toISOString() } });
+    closeSheet(); showToast('✓ 予定を修正しました'); refreshTimeline();
+  } catch (e) { showToast(e.status === 403 ? '他の人が作った予定は修正できません' : '修正できませんでした: ' + e.message, true); }
+}
+async function deleteEventFromSheet(idx) {
+  if (!requireGoogle()) return;
+  const it = timeline[idx]; if (!it) return;
+  if (!confirm(`「${it.title}」をカレンダーから削除しますか？`)) return;
+  try { await deleteCalEvent(it.id); closeSheet(); showToast('🗑️ 削除しました'); refreshTimeline(); }
+  catch (e) { showToast(e.status === 403 ? '他の人が作った予定は削除できません' : '削除できませんでした: ' + e.message, true); }
+}
+
+// =====================================================
+// AIからの問いかけ
+// =====================================================
+let qBusy = false, lastAutoQ = 0;
+function recentQuestions() {
+  return DB.journals.filter(j => !j.deleted && /#問いかけ/.test(j.tags || ''))
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 8)
+    .map(j => { const m = String(j.content).match(/【AIの問い】([^\n]+)/); return m ? m[1] : ''; }).filter(Boolean);
+}
+async function newQuestion(auto) {
+  if (qBusy) return;
+  if (!(DB.settings.claudeKey || '').trim()) { if (!auto) showToast('「予定・設定」タブでClaude APIキーを設定してください', true); return; }
+  qBusy = true; renderQuestion();
+  try {
+    const since = Date.now() - 14 * 864e5;
+    const js = DB.journals.filter(j => !j.deleted && (j.createdAt || 0) >= since && !/#問いかけ/.test(j.tags || ''))
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 15)
+      .map(j => { const d = new Date(j.createdAt); return `- ${d.getMonth() + 1}/${d.getDate()}(${WD[d.getDay()]}) [${j.tags || ''}] ${String(j.content).slice(0, 200)}`; }).join('\n');
+    const answered = DB.journals.filter(j => !j.deleted && /#問いかけ/.test(j.tags || '') && (j.createdAt || 0) >= since)
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 5)
+      .map(j => '- ' + String(j.content).replace(/\n+/g, ' ').slice(0, 160)).join('\n');
+    const tasks = openTasks().slice(0, 10).map(t => `- ${t.title}${t.deadline ? `（期限${fmtMD(t.deadline)}）` : ''}`).join('\n');
+    const yd = new Date(); yd.setDate(yd.getDate() - 1);
+    const logs = [logLines(ymd(yd)), logLines(todayStr())].filter(Boolean).join('\n');
+    const sys = memorySystem('あなたはユーザーに寄り添う振り返りコーチです。必ずJSONのみを出力します。');
+    const user = `現在日時: ${nowLabel()}
+
+【最近のジャーナル（新しい順）】
+${js || '（ほとんどなし）'}
+
+【最近の問いかけへの回答】
+${answered || '（なし）'}
+
+【最近の行動記録】
+${logs || '（なし）'}
+
+【抱えているタスク】
+${tasks || '（なし）'}
+
+【最近すでにした質問（同じ内容は避ける）】
+${recentQuestions().map(q => '- ' + q).join('\n') || '（なし）'}
+
+ユーザーの振り返りを深める質問を1つだけしてください。
+- 具体的な出来事や記録に触れる（例：「10/25のロング走、その後脚の疲れはどうですか？」）
+- 種類は「その後どうなったか」「今どう考えているか」「次はどうしたいか」などから、今いちばん意味のあるものを選ぶ
+- 前回の回答の続きを聞くのも良い
+- 1〜2文、親しみやすい丁寧語。答えやすく具体的に
+出力（JSONのみ）: {"question":"質問文","about":"何についての質問か（15字以内、例：10/25 ロング走）","tags":["関連タグ"]}`;
+    const out = extractJson(await callClaude(sys, user, 600));
+    if (!out.question) throw new Error('AIが質問を作れませんでした');
+    DB.aiQ = { id: uid(), date: todayStr(), question: String(out.question).trim(), about: String(out.about || '').trim(), tags: (out.tags || []).join(' '), answered: false, updatedAt: Date.now() };
+    $('aiqAnswer').value = '';
+    commit();
+  } catch (e) {
+    if (!auto) showToast(e.message, true);
+  } finally {
+    qBusy = false; renderQuestion();
+  }
+}
+function maybeAutoQuestion() {
+  if (qBusy || !navigator.onLine || !(DB.settings.claudeKey || '').trim()) return;
+  if (DB.aiQ && DB.aiQ.date === todayStr()) return;
+  if (!DB.journals.some(j => !j.deleted)) return;
+  if (Date.now() - lastAutoQ < 30 * 60000) return;
+  lastAutoQ = Date.now();
+  newQuestion(true);
+}
+function renderQuestion() {
+  const q = DB.aiQ;
+  const hasKey = !!(DB.settings.claudeKey || '').trim();
+  const about = $('aiqAbout'), text = $('aiqText'), area = $('aiqAnswerArea');
+  $('aiqNewBtn').textContent = q ? '🔄 別の質問' : '💬 質問をもらう';
+  $('aiqNewBtn').disabled = qBusy;
+  if (qBusy) {
+    about.style.display = 'none'; area.style.display = 'none';
+    text.innerHTML = '<span class="q-wait">🤖 最近の記録を読んで、質問を考えています…</span>'; return;
+  }
+  if (!q) {
+    about.style.display = 'none'; area.style.display = 'none';
+    text.innerHTML = `<span class="q-wait">${hasKey ? 'ジャーナルの内容から、AIが振り返りの質問をします。毎日1つ自動で届きます。' : 'Claude APIキーを設定すると、ジャーナルの内容からAIが質問してくれます。'}</span>`;
+    return;
+  }
+  about.textContent = (q.about ? '📌 ' + q.about : '📌 最近の記録から') + (q.date !== todayStr() ? `（${fmtMD(q.date)}の質問）` : '');
+  about.style.display = 'inline-block';
+  text.textContent = q.question;
+  if (q.answered) {
+    area.style.display = 'none';
+    text.innerHTML = `${esc(q.question)}<div class="hint" style="margin-top:6px; font-weight:600;">✓ 答えをジャーナルに記録しました。「🔄 別の質問」で次の質問がもらえます。</div>`;
+  } else {
+    area.style.display = 'block';
+  }
+}
+function answerQuestion() {
+  if (rec) rec.stop();
+  const q = DB.aiQ;
+  const ans = $('aiqAnswer').value.trim();
+  if (!q || !ans) return;
+  const now = Date.now();
+  DB.journals.push({ id: uid(), createdAt: now, content: `【AIの問い】${q.question}\n【答え】${ans}`, tags: normTag((q.tags || '') + ' #問いかけ'), updatedAt: now });
+  q.answered = true; touch(q);
+  $('aiqAnswer').value = '';
+  showToast('✓ 答えをジャーナルに記録しました');
+  commit();
+}
+
+// =====================================================
+// 行動記録
+// =====================================================
+const LOG_RULES = `   - 各要素: date(YYYY-MM-DD), start("HH:mm"), end("HH:mm" または進行中なら ""), text(行動を簡潔に。20字以内), category(タグ1つ。例 #教務 #数学 #部活 #マラソン #日常)
+   - 「〜した」で時刻が分からない → end=現在時刻、start=内容から妥当な所要時間を推定して逆算
+   - 「〜分やった」 → end=現在時刻から逆算。「〜時から〜時まで」 → そのまま
+   - 「今から〜」「〜している」 → start=現在時刻（指定があればその時刻）、end=""
+   - 「昨日」などは date を変える。未来の行動は含めない`;
+let logDate = todayStr();
+const dayLogs = d => DB.logs.filter(l => !l.deleted && l.date === d).sort((a, b) => String(a.start).localeCompare(String(b.start)));
+function logMinutes(l) {
+  const toMin = s => { const [h, m] = String(s).split(':').map(Number); return h * 60 + m; };
+  if (!l.start) return 0;
+  if (l.end) return Math.max(0, toMin(l.end) - toMin(l.start));
+  if (l.date === todayStr()) return Math.max(0, toMin(hm(new Date())) - toMin(l.start));
+  return 0;
+}
+const fmtMin = m => m >= 60 ? `${Math.floor(m / 60)}時間${m % 60 ? (m % 60) + '分' : ''}` : `${m}分`;
+function logLines(d) { return dayLogs(d).map(l => `${fmtMD(d)} ${l.start}〜${l.end || '進行中'} ${l.text} ${l.category || ''}`).join('\n'); }
+
+function addLogs(list) {
+  if (!Array.isArray(list)) return 0;
+  let n = 0;
+  const now = Date.now();
+  list.forEach(x => {
+    if (!x || !x.text) return;
+    const fixT = s => /^\d{1,2}:\d{2}$/.test(String(s || '').trim()) ? String(s).trim().padStart(5, '0') : '';
+    const start = fixT(x.start); if (!start) return;
+    let end = fixT(x.end);
+    if (end && end < start) end = '';
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(x.date || '') ? x.date : todayStr();
+    if (!end) {
+      // 新しく始めたら、それより前に始まった進行中の記録は終了させる
+      dayLogs(date).filter(o => !o.end && o.start <= start).forEach(o => { o.end = start; touch(o); });
+    }
+    DB.logs.push({ id: uid(), date, start, end, text: String(x.text).trim(), category: normTag(x.category).split(' ')[0], createdAt: now, updatedAt: now });
+    logDate = date;
+    n++;
+  });
+  return n;
+}
+async function submitLog() {
+  if (rec) rec.stop();
+  const el = $('logInput');
+  const text = el.value.trim();
+  if (!text) return;
+  if (!(DB.settings.claudeKey || '').trim()) {
+    addLogs([{ date: todayStr(), start: hm(new Date()), end: '', text, category: '#日常' }]);
+    el.value = ''; showToast('🕒 今から「' + text + '」として記録しました'); commit(); return;
+  }
+  const btn = $('logBtn');
+  btn.disabled = true; btn.textContent = '🧠 記録中…';
+  try {
+    const sys = memorySystem('あなたはユーザーの行動記録係です。必ずJSONのみを出力します。');
+    const user = `現在日時: ${nowLabel()}
+今日のこれまでの行動記録:
+${logLines(todayStr()) || '（まだなし）'}
+
+次の【入力】から行動記録を抽出してください。
+${LOG_RULES}
+出力（JSONのみ）: {"logs":[{"date":"","start":"","end":"","text":"","category":""}],"message":"ひとこと（30字以内）"}
+
+【入力】
+${text}`;
+    const out = extractJson(await callClaude(sys, user, 800));
+    const n = addLogs(out.logs);
+    if (!n) throw new Error('行動として読み取れませんでした。「10時から採点した」のように書いてみてください');
+    el.value = '';
+    showToast('🕒 ' + (out.message || `${n}件記録しました`));
+    commit();
+  } catch (e) { showToast(e.message, true); }
+  finally { btn.disabled = false; btn.textContent = '🕒 AIで行動を記録'; }
+}
+function shiftLogDate(n) {
+  const d = parseYmd(logDate); d.setDate(d.getDate() + n);
+  const s = ymd(d);
+  if (s > todayStr()) return;
+  logDate = s; renderLogs();
+}
+function renderLogs() {
+  const today = todayStr();
+  if (logDate > today) logDate = today;
+  const d = parseYmd(logDate);
+  $('logDateLabel').textContent = logDate === today ? '今日' : `${d.getMonth() + 1}/${d.getDate()}(${WD[d.getDay()]})`;
+  $('logNextBtn').style.visibility = logDate === today ? 'hidden' : 'visible';
+  const list = dayLogs(logDate);
+  if (!list.length) {
+    $('logSummary').innerHTML = '';
+    $('logList').innerHTML = `<div class="hint" style="padding:10px 0;">${logDate === today ? 'まだ記録はありません。「10時から3組の採点をした」「今から部活」のように話しかけてください。' : 'この日の記録はありません。'}</div>`;
+    return;
+  }
+  const byCat = {};
+  let total = 0;
+  list.forEach(l => { const m = logMinutes(l); total += m; byCat[l.category || '#日常'] = (byCat[l.category || '#日常'] || 0) + m; });
+  $('logSummary').innerHTML = `<div class="log-sum"><span class="mini-badge" style="background:#0f766e; color:#fff;">合計 ${fmtMin(total)}</span>${Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([c, m]) => `<span class="mini-badge" style="color:#0f766e; background:#f0fdfa;">${esc(c)} ${fmtMin(m)}</span>`).join('')}</div>`;
+  $('logList').innerHTML = list.map(l => `
+    <div class="log-item" data-id="${esc(l.id)}" onclick="openLogSheet(this.dataset.id)">
+      <div class="log-time">${esc(l.start)}〜${l.end ? esc(l.end) : '<span class="log-live">進行中</span>'}</div>
+      <div style="flex:1; min-width:0;">
+        <div style="font-weight:700; font-size:13px; word-break:break-word;">${esc(l.text)}</div>
+        <div class="mini-badges"><span class="mini-badge" style="color:#0f766e; background:#f0fdfa;">${esc(l.category || '#日常')}</span><span class="mini-badge">${fmtMin(logMinutes(l))}</span></div>
+      </div>
+      ${!l.end && l.date === today ? `<button class="btn-mini" onclick="event.stopPropagation();endLog(this.closest('[data-id]').dataset.id)">■ 終了</button>` : ''}
+    </div>`).join('');
+}
+function endLog(id) {
+  const l = DB.logs.find(x => x.id === id); if (!l) return;
+  l.end = hm(new Date()); touch(l);
+  showToast(`✓ 「${l.text}」を終了（${fmtMin(logMinutes(l))}）`);
+  commit();
+}
+function openLogSheet(id) {
+  const l = id ? DB.logs.find(x => x.id === id) : null;
+  const v = l || { date: logDate, start: hm(new Date()), end: '', text: '', category: '#日常' };
+  const cats = Array.from(new Set([...PRESET_TAGS, ...DB.logs.filter(x => !x.deleted).map(x => x.category).filter(Boolean)]));
+  openSheet(`
+    <h3>${l ? '✏️ 行動記録を修正' : '＋ 行動記録を追加'}</h3>
+    <div class="form-row"><label>やったこと</label><input type="text" id="lgText" value="${esc(v.text)}" placeholder="例：3組の採点"></div>
+    <div class="form-row"><label>タグ</label><input type="text" id="lgCat" list="lgCatList" value="${esc(v.category || '#日常')}">
+      <datalist id="lgCatList">${cats.map(c => `<option value="${esc(c)}">`).join('')}</datalist></div>
+    <div class="form-row"><label>日付</label><input type="date" id="lgDate" value="${esc(v.date)}" max="${todayStr()}"></div>
+    <div style="display:flex; gap:8px;">
+      <div class="form-row" style="flex:1;"><label>開始</label><input type="time" id="lgStart" value="${esc(v.start)}"></div>
+      <div class="form-row" style="flex:1;"><label>終了（空欄＝進行中）</label><input type="time" id="lgEnd" value="${esc(v.end)}"></div>
+    </div>
+    <button class="btn-send" style="background:#0f766e;" onclick="saveLogSheet('${l ? esc(l.id) : ''}')">✓ 保存</button>
+    <div class="btn-row">
+      ${l ? `<button class="btn-danger" onclick="deleteLog('${esc(l.id)}')">🗑️ 削除</button>` : ''}
+      <button class="btn-sub" onclick="closeSheet()">閉じる</button>
+    </div>`);
+}
+function saveLogSheet(id) {
+  const text = $('lgText').value.trim(), start = $('lgStart').value, end = $('lgEnd').value, date = $('lgDate').value || todayStr();
+  if (!text || !start) { alert('やったことと開始時刻を入力してください'); return; }
+  if (end && end <= start) { alert('終了時刻は開始時刻より後にしてください'); return; }
+  const category = normTag($('lgCat').value).split(' ')[0];
+  if (id) {
+    const l = DB.logs.find(x => x.id === id); if (!l) return;
+    Object.assign(l, { text, start, end, date, category }); touch(l);
+  } else {
+    const now = Date.now();
+    DB.logs.push({ id: uid(), date, start, end, text, category, createdAt: now, updatedAt: now });
+  }
+  logDate = date;
+  closeSheet(); showToast('✓ 保存しました'); commit();
+}
+function deleteLog(id) {
+  const l = DB.logs.find(x => x.id === id); if (!l) return;
+  if (!confirm(`「${l.text}」の記録を削除しますか？`)) return;
+  l.deleted = true; touch(l);
+  closeSheet(); commit();
 }
 
 // =====================================================
@@ -1609,6 +2025,7 @@ function switchTab(tab) {
   if (!cid) {
     if (!lsGet('pm_setupSkipped')) openSetup();
     setStatus('local');
+    maybeAutoQuestion();
   } else if (hasToken()) {
     runSync(true);
   } else if (!justLoggedIn && navigator.onLine && lsGet('pm_loggedIn') && Date.now() - Number(lsGet('pm_auth_try') || 0) > 60000) {
@@ -1626,7 +2043,7 @@ function switchTab(tab) {
   window.addEventListener('online', () => runSync(true));
   window.addEventListener('offline', () => setStatus('offline'));
   setInterval(() => { if (document.visibilityState === 'visible' && hasToken()) runSync(true); }, 5 * 60 * 1000);
-  setInterval(renderTimeline, 60 * 1000);
+  setInterval(() => { renderTimeline(); renderLogs(); }, 60 * 1000);
 })();
 </script>
 </body>
