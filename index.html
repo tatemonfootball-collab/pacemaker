@@ -123,6 +123,11 @@
     .nav-item { flex:1; text-align:center; font-size:12px; font-weight:700; color:var(--sub); cursor:pointer; padding:6px 0; }
     .nav-item.active { color:var(--primary); }
 
+    .offline-banner { background:#f1f5f9; border-bottom:1px solid #cbd5e1; color:#334155; font-size:12px; font-weight:700; padding:8px 16px; line-height:1.5; }
+    .pend-box { margin-top:10px; background:#fffbeb; border:1px dashed #f59e0b; border-radius:12px; padding:8px 10px; }
+    .pend-head { font-size:11px; font-weight:800; color:#92400e; margin-bottom:4px; }
+    .pend-item { display:flex; gap:8px; align-items:center; font-size:13px; padding:4px 0; }
+    .pend-time { font-size:11px; font-weight:800; color:#b45309; white-space:nowrap; }
     .slot-chip { cursor:pointer; }
     .slot-hint { font-size:10px; color:#94a3b8; margin-top:2px; }
     .sheet-bg { position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:90; display:none; align-items:flex-end; justify-content:center; }
@@ -174,6 +179,7 @@
     <span id="connectBannerText">Googleとの接続が切れています</span>
     <button onclick="login()">接続する</button>
   </div>
+  <div id="offlineBanner" class="offline-banner" style="display:none;">📴 オフライン中 ― タスクの完了・追加・メモ・行動記録はそのまま使えます。AIへの入力は電波が戻ったら自動で処理します。</div>
   <div id="toast" class="toast"></div>
 
   <div class="container">
@@ -194,6 +200,7 @@
             <button id="micBtn" class="btn-mic" onclick="toggleMic('voiceText','micBtn')" title="音声入力">🎙️</button>
           </div>
           <button id="sendBtn" class="btn-send" onclick="submitVoice()">✨ AIでタスク・予定・記録に自動仕分け</button>
+          <div id="pendingSort"></div>
         </div>
 
         <div id="aiReplyBox" class="ai-reply"></div>
@@ -242,6 +249,7 @@
             <button id="logMic" class="btn-mic" onclick="toggleMic('logInput','logMic')" title="音声入力">🎙️</button>
           </div>
           <button id="logBtn" class="btn-send" style="background:#0f766e;" onclick="submitLog()">🕒 AIで行動を記録</button>
+          <div id="pendingLog"></div>
           <div id="logSummary"></div>
           <div id="logList"></div>
           <button class="btn-sub" onclick="openLogSheet('')">＋ 手で追加</button>
@@ -371,7 +379,7 @@
         </div>
         <input type="file" id="importFile" accept=".json,application/json" style="display:none;" onchange="importFile(this)">
         <div class="hint" style="margin-top:6px;">「取り込み」はGAS版からの移行ファイル（pacemaker-export.json）やバックアップを読み込めます。</div>
-        <div class="hint" style="margin-top:10px; text-align:right;">AI PaceMaker v4.1</div>
+        <div class="hint" style="margin-top:10px; text-align:right;">AI PaceMaker v4.2</div>
       </div>
     </div>
   </div>
@@ -496,7 +504,7 @@ function normalizeDB(d) {
 let DB = (() => { try { const s = lsGet('pm_db'); return s ? normalizeDB(JSON.parse(s)) : emptyDB(); } catch (e) { return emptyDB(); } })();
 function saveLocal() { lsSet('pm_db', JSON.stringify(DB)); }
 function touch(o) { o.updatedAt = Date.now(); }
-function commit() { saveLocal(); render(); schedulePush(); }
+function commit() { saveLocal(); lsSet('pm_dirty', '1'); render(); schedulePush(); }
 
 // 項目ごとに「新しいほうが勝つ」マージ（複数端末の同時編集に強い）
 function mergeList(a, b) {
@@ -592,10 +600,11 @@ let token = (() => { try { return JSON.parse(lsGet('pm_token') || 'null'); } cat
 const hasToken = () => !!(token && token.value && token.exp > Date.now());
 const redirectUri = () => location.origin + location.pathname.replace(/index\.html$/, '');
 
-function login(forceConsent) {
+async function login(forceConsent) {
   const cid = lsGet('pm_clientId');
   if (!cid) { openSetup(); return; }
-  if (!navigator.onLine) { showToast('オフラインです', true); return; }
+  // 電波が弱いときにGoogleのページへ飛ぶと戻れなくなるので、先に確認する
+  if (!(await canReach())) { showToast('📴 電波が弱いので今は接続できません。入力はこの端末に保存されます', true); return; }
   saveLocal();
   const state = uid();
   lsSet('pm_oauth_state', state);
@@ -642,11 +651,46 @@ function logout() {
 // Google API 共通
 // =====================================================
 class ApiError extends Error { constructor(msg, status) { super(msg); this.status = status; this.auth = status === 401; } }
+
+// ---- 電波チェック（電波が弱くても固まらないように時間制限つき） ----
+let netOK = navigator.onLine;
+function markNet(ok) { if (netOK !== ok) { netOK = ok; updateOfflineUI(); } }
+const isNet = e => !!(e && e.net);
+const looksOffline = () => !navigator.onLine;
+async function fetchT(url, opt, ms) {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), ms);
+  try {
+    const r = await fetch(url, Object.assign({}, opt, { signal: ac.signal }));
+    markNet(true);
+    return r;
+  } catch (e) {
+    markNet(false);
+    const err = new ApiError('電波が弱いため通信できませんでした', 0);
+    err.net = true;
+    throw err;
+  } finally { clearTimeout(timer); }
+}
+async function canReach() {
+  if (!navigator.onLine) return false;
+  try {
+    const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 4000);
+    await fetch('https://www.gstatic.com/generate_204', { mode: 'no-cors', cache: 'no-store', signal: ac.signal });
+    clearTimeout(t); markNet(true); return true;
+  } catch (e) { markNet(false); return false; }
+}
+function updateOfflineUI() {
+  const off = !navigator.onLine || !netOK;
+  $('offlineBanner').style.display = off ? 'block' : 'none';
+  if (off && lsGet('pm_clientId')) setStatus('offline');
+  if (!off) updateConnUI();
+}
+
 async function gapi(url, opt = {}) {
   if (!hasToken()) throw new ApiError('未ログイン', 401);
   const headers = Object.assign({ Authorization: 'Bearer ' + token.value }, opt.headers || {});
   if (opt.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
-  const res = await fetch(url, Object.assign({}, opt, { headers }));
+  const res = await fetchT(url, Object.assign({}, opt, { headers }), 20000);
   if (res.status === 401) { token = null; lsDel('pm_token'); throw new ApiError('認証切れ', 401); }
   if (!res.ok) {
     let m = 'HTTP ' + res.status;
@@ -844,6 +888,7 @@ async function deleteCalEvent(id) {
   catch (e) { if (e.status !== 404 && e.status !== 410) throw e; }
 }
 function requireGoogle() {
+  if (looksOffline()) { showToast('📴 オフラインのため予定の変更はできません。電波のある所でどうぞ', true); return false; }
   if (!hasToken()) { showToast('Googleに接続してください', true); updateConnUI(); return false; }
   return true;
 }
@@ -854,7 +899,9 @@ function requireGoogle() {
 let syncing = false, syncQueued = false, queuedFull = false, pushTimer = null, lastFullSync = 0;
 function setStatus(s) {
   const map = { ok: '☁️ 同期済', syncing: '🔄 同期中…', auth: '⚠️ 未接続', offline: '📴 オフライン', error: '⚠️ 同期エラー', local: '📱 端末のみ' };
-  $('syncStatus').textContent = map[s] || '';
+  let t = map[s] || '';
+  if (s === 'offline' && lsGet('pm_dirty')) t += '・未送信あり';
+  $('syncStatus').textContent = t;
 }
 function schedulePush() { clearTimeout(pushTimer); pushTimer = setTimeout(() => runSync(false), 1500); }
 async function runSync(full) {
@@ -870,12 +917,15 @@ async function runSync(full) {
     if (full) await reconcileGoogle();
     saveLocal();
     await drivePush();
+    lsDel('pm_dirty');
     if (full) { try { await loadTimeline(); } catch (e) { console.warn('カレンダー取得エラー', e); } lastFullSync = Date.now(); }
     setStatus('ok');
-    if (full) setTimeout(maybeAutoQuestion, 500);
+    updateOfflineUI();
+    setTimeout(processPendingAI, 300);
+    if (full) setTimeout(maybeAutoQuestion, 1500);
   } catch (e) {
     console.error(e);
-    if (e.auth) { setStatus('auth'); updateConnUI(); } else { setStatus('error'); }
+    if (e.auth) { setStatus('auth'); updateConnUI(); } else if (isNet(e)) { setStatus('offline'); } else { setStatus('error'); }
   } finally {
     syncing = false;
     saveLocal();
@@ -891,7 +941,7 @@ function manualSync() {
 }
 function updateConnUI() {
   const cid = lsGet('pm_clientId');
-  const show = !!cid && !hasToken();
+  const show = !!cid && !hasToken() && navigator.onLine && netOK;
   $('connectBanner').style.display = show ? 'flex' : 'none';
   $('googleStatusText').textContent = !cid ? '未設定（この端末だけで動作中）' : hasToken() ? '✅ 接続中（ドライブ・ToDo・カレンダー）' : '⚠️ 接続が切れています';
   if (!cid) setStatus('local'); else if (!hasToken()) setStatus(navigator.onLine ? 'auth' : 'offline');
@@ -903,7 +953,7 @@ function updateConnUI() {
 async function callClaude(system, user, maxTokens) {
   const key = (DB.settings.claudeKey || '').trim();
   if (!key) throw new Error('「予定・設定」タブでClaude APIキーを設定してください');
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const res = await fetchT('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'x-api-key': key,
@@ -912,7 +962,7 @@ async function callClaude(system, user, maxTokens) {
       'anthropic-dangerous-direct-browser-access': 'true'
     },
     body: JSON.stringify({ model: DB.settings.claudeModel || DEFAULT_MODEL, max_tokens: maxTokens || 2000, system, messages: [{ role: 'user', content: user }] })
-  });
+  }, 60000);
   let j = null;
   try { j = await res.json(); } catch (e) {}
   if (!res.ok) throw new Error('AIエラー: ' + ((j && j.error && j.error.message) || res.status));
@@ -930,7 +980,7 @@ ${DB.memory.profile || '（未設定）'}
 【AI学習メモ（ユーザーの習慣・好み・ルール。判断に必ず反映すること）】
 ${DB.memory.learned || '特になし'}`;
 }
-function nowLabel() { const n = new Date(); return `${ymd(n)} ${hm(n)} (${WD[n.getDay()]})`; }
+function nowLabel(ts) { const n = new Date(ts || Date.now()); return `${ymd(n)} ${hm(n)} (${WD[n.getDay()]})`; }
 
 // =====================================================
 // 画面：今やること
@@ -968,6 +1018,7 @@ function render() {
   renderCompleted();
   renderQuestion();
   renderLogs();
+  renderPending();
   renderJournals();
   renderConfig();
 }
@@ -1252,17 +1303,85 @@ function toggleMic(targetId, btnId) {
   try { r.start(); $(btnId).classList.add('rec'); } catch (e) { rec = null; }
 }
 
+// ---- 電波待ちのAI入力（この端末だけに保存。電波が戻ったら入力した時刻として処理） ----
+let pendingAI = (() => { try { return JSON.parse(lsGet('pm_pendingAI') || '[]'); } catch (e) { return []; } })();
+let pendingBusy = false;
+function savePending() { lsSet('pm_pendingAI', JSON.stringify(pendingAI)); renderPending(); }
+function queueAI(kind, text) { pendingAI.push({ id: uid(), kind, text, at: Date.now(), tries: 0 }); savePending(); }
+async function processPendingAI() {
+  if (pendingBusy || !pendingAI.length || looksOffline() || !(DB.settings.claudeKey || '').trim()) return;
+  pendingBusy = true;
+  let done = 0;
+  try {
+    while (pendingAI.length) {
+      const it = pendingAI[0];
+      try {
+        if (it.kind === 'log') await runLog(it.text, it.at); else await runSort(it.text, it.at);
+        done++; pendingAI.shift(); savePending();
+      } catch (e) {
+        if (isNet(e)) break;
+        it.tries = (it.tries || 0) + 1;
+        if (it.tries >= 3) {
+          // 3回失敗したら、入力内容が消えないようジャーナルにそのまま残す
+          DB.journals.push({ id: uid(), createdAt: it.at, content: it.text, tags: '#未処理', updatedAt: Date.now() });
+          pendingAI.shift(); savePending(); commit();
+        } else { savePending(); break; }
+      }
+    }
+  } finally { pendingBusy = false; }
+  if (done) showToast(`📶 電波待ちだった${done}件をAIで処理しました`);
+}
+function removePending(id) {
+  if (!confirm('この入力を取り消しますか？')) return;
+  pendingAI = pendingAI.filter(p => p.id !== id);
+  savePending();
+}
+function renderPending() {
+  const mk = kind => pendingAI.filter(p => p.kind === kind).map(p => {
+    const d = new Date(p.at);
+    const when = ymd(d) === todayStr() ? hm(d) : `${d.getMonth() + 1}/${d.getDate()} ${hm(d)}`;
+    return `<div class="pend-item"><span class="pend-time">${when}</span><span style="flex:1; min-width:0; word-break:break-word;">${esc(p.text)}</span><button class="btn-restore" data-id="${esc(p.id)}" onclick="removePending(this.dataset.id)">✕</button></div>`;
+  }).join('');
+  const s = mk('sort'), l = mk('log');
+  $('pendingSort').innerHTML = s ? `<div class="pend-box"><div class="pend-head">⏳ 電波待ち ― つながったら自動でAIが仕分けます</div>${s}</div>` : '';
+  $('pendingLog').innerHTML = l ? `<div class="pend-box"><div class="pend-head">⏳ 電波待ち ― つながったら入力した時刻で記録します</div>${l}</div>` : '';
+}
+
 async function submitVoice() {
   if (rec) rec.stop();
   const textEl = $('voiceText');
   const text = textEl.value.trim();
   if (!text) return;
+  if (!(DB.settings.claudeKey || '').trim()) { showToast('「予定・設定」タブでClaude APIキーを設定してください', true); return; }
+  if (looksOffline()) {
+    queueAI('sort', text); textEl.value = '';
+    showToast('📴 オフラインなので保存しました。電波が戻ったらAIが仕分けます');
+    return;
+  }
   const btn = $('sendBtn');
   btn.disabled = true;
   btn.textContent = '🧠 AIが仕分け中…';
   try {
+    const r = await runSort(text, Date.now());
+    textEl.value = '';
+    const box = $('aiReplyBox');
+    box.style.display = 'block';
+    box.textContent = r;
+    setTimeout(() => { box.style.display = 'none'; }, 6000);
+  } catch (e) {
+    if (isNet(e)) {
+      queueAI('sort', text); textEl.value = '';
+      showToast('📴 電波が弱いので保存しました。つながったらAIが仕分けます');
+    } else showToast(e.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '✨ AIでタスク・予定・記録に自動仕分け';
+  }
+}
+
+async function runSort(text, at) {
     const sys = memorySystem('あなたはユーザーの専属AIタスク＆スケジュールマネージャーです。必ずJSONのみを出力します。');
-    const user = `現在日時: ${nowLabel()}
+    const user = `現在日時: ${nowLabel(at)}
 
 以下の【入力テキスト】を分析し、JSON形式で出力してください。
 1. journal: 思考や出来事、業務メモ、ランニング記録などの要約とタグ（#教務, #数学, #マラソン, #部活, #手帳, #日常 など複数可）。記録すべき内容がなければ content を空文字に。
@@ -1289,7 +1408,7 @@ ${text}`;
     const out = extractJson(await callClaude(sys, user, 3000));
     const now = Date.now();
     if (out.journal && out.journal.content && out.journal.content.trim()) {
-      DB.journals.push({ id: uid(), createdAt: now, content: out.journal.content.trim(), tags: (out.journal.tags || []).map(x => String(x).startsWith('#') ? x : '#' + x).join(' '), updatedAt: now });
+      DB.journals.push({ id: uid(), createdAt: at || now, content: out.journal.content.trim(), tags: (out.journal.tags || []).map(x => String(x).startsWith('#') ? x : '#' + x).join(' '), updatedAt: now });
     }
     const tasks = Array.isArray(out.tasks) ? out.tasks.filter(t => t && t.title) : [];
     tasks.forEach(t => {
@@ -1313,24 +1432,15 @@ ${text}`;
       if (!hasToken()) { evFail++; continue; }
       try { await createCalEvent(ev.title || '予定', s, end); evCount++; } catch (err) { evFail++; console.warn(err); }
     }
-    const logCount = addLogs(out.logs);
-    textEl.value = '';
-    const box = $('aiReplyBox');
-    box.style.display = 'block';
-    box.textContent = `🤖 ${out.aiMessage || '登録しました！'}\n（タスク ${tasks.length}件 / カレンダー ${evCount}件${logCount ? ` / 行動記録 ${logCount}件` : ''}${evFail ? ` / 未登録 ${evFail}件（Google未接続）` : ''}）`;
-    setTimeout(() => { box.style.display = 'none'; }, 6000);
+    const logCount = addLogs(out.logs, at);
     commit();
     if (evCount && hasToken()) loadTimeline().then(renderTimeline).catch(() => {});
-  } catch (e) {
-    showToast(e.message, true);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '✨ AIでタスク・予定・記録に自動仕分け';
-  }
+    return `🤖 ${out.aiMessage || '登録しました！'}\n（タスク ${tasks.length}件 / カレンダー ${evCount}件${logCount ? ` / 行動記録 ${logCount}件` : ''}${evFail ? ` / 未登録 ${evFail}件（Google未接続）` : ''}）`;
 }
 
 // ---- AIに相談 ----
 async function askAI() {
+  if (looksOffline()) { showToast('📴 オフラインのため「AIに相談」は使えません。総合おすすめを表示します', true); setMode('auto'); return; }
   setMode('ai');
   const open = openTasks();
   if (!open.length) return;
@@ -1565,17 +1675,18 @@ function logMinutes(l) {
 const fmtMin = m => m >= 60 ? `${Math.floor(m / 60)}時間${m % 60 ? (m % 60) + '分' : ''}` : `${m}分`;
 function logLines(d) { return dayLogs(d).map(l => `${fmtMD(d)} ${l.start}〜${l.end || '進行中'} ${l.text} ${l.category || ''}`).join('\n'); }
 
-function addLogs(list) {
+function addLogs(list, at) {
   if (!Array.isArray(list)) return 0;
   let n = 0;
   const now = Date.now();
+  const baseDate = ymd(new Date(at || now));
   list.forEach(x => {
     if (!x || !x.text) return;
     const fixT = s => /^\d{1,2}:\d{2}$/.test(String(s || '').trim()) ? String(s).trim().padStart(5, '0') : '';
     const start = fixT(x.start); if (!start) return;
     let end = fixT(x.end);
     if (end && end < start) end = '';
-    const date = /^\d{4}-\d{2}-\d{2}$/.test(x.date || '') ? x.date : todayStr();
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(x.date || '') ? x.date : baseDate;
     if (!end) {
       // 新しく始めたら、それより前に始まった進行中の記録は終了させる
       dayLogs(date).filter(o => !o.end && o.start <= start).forEach(o => { o.end = start; touch(o); });
@@ -1595,13 +1706,31 @@ async function submitLog() {
     addLogs([{ date: todayStr(), start: hm(new Date()), end: '', text, category: '#日常' }]);
     el.value = ''; showToast('🕒 今から「' + text + '」として記録しました'); commit(); return;
   }
+  if (looksOffline()) {
+    queueAI('log', text); el.value = '';
+    showToast('📴 オフラインなので保存しました。電波が戻ったら今の時刻で記録します');
+    return;
+  }
   const btn = $('logBtn');
   btn.disabled = true; btn.textContent = '🧠 記録中…';
   try {
+    const msg = await runLog(text, Date.now());
+    el.value = '';
+    showToast('🕒 ' + msg);
+  } catch (e) {
+    if (isNet(e)) {
+      queueAI('log', text); el.value = '';
+      showToast('📴 電波が弱いので保存しました。つながったら今の時刻で記録します');
+    } else showToast(e.message, true);
+  }
+  finally { btn.disabled = false; btn.textContent = '🕒 AIで行動を記録'; }
+}
+async function runLog(text, at) {
     const sys = memorySystem('あなたはユーザーの行動記録係です。必ずJSONのみを出力します。');
-    const user = `現在日時: ${nowLabel()}
+    const day = ymd(new Date(at));
+    const user = `現在日時: ${nowLabel(at)}
 今日のこれまでの行動記録:
-${logLines(todayStr()) || '（まだなし）'}
+${logLines(day) || '（まだなし）'}
 
 次の【入力】から行動記録を抽出してください。
 ${LOG_RULES}
@@ -1610,13 +1739,10 @@ ${LOG_RULES}
 【入力】
 ${text}`;
     const out = extractJson(await callClaude(sys, user, 800));
-    const n = addLogs(out.logs);
+    const n = addLogs(out.logs, at);
     if (!n) throw new Error('行動として読み取れませんでした。「10時から採点した」のように書いてみてください');
-    el.value = '';
-    showToast('🕒 ' + (out.message || `${n}件記録しました`));
     commit();
-  } catch (e) { showToast(e.message, true); }
-  finally { btn.disabled = false; btn.textContent = '🕒 AIで行動を記録'; }
+    return out.message || `${n}件記録しました`;
 }
 function shiftLogDate(n) {
   const d = parseYmd(logDate); d.setDate(d.getDate() + n);
@@ -2017,7 +2143,7 @@ function switchTab(tab) {
   const justLoggedIn = handleAuthRedirect();
   render();
 
-  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  if ('serviceWorker' in navigator && window.isSecureContext) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
 
@@ -2035,15 +2161,21 @@ function switchTab(tab) {
     updateConnUI();
   }
 
+  updateOfflineUI();
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
     renderTimeline();
     if (hasToken()) runSync(Date.now() - lastFullSync > 60000); else updateConnUI();
+    processPendingAI();
   });
-  window.addEventListener('online', () => runSync(true));
-  window.addEventListener('offline', () => setStatus('offline'));
+  window.addEventListener('online', () => { netOK = true; updateOfflineUI(); runSync(true); processPendingAI(); });
+  window.addEventListener('offline', () => { updateOfflineUI(); });
   setInterval(() => { if (document.visibilityState === 'visible' && hasToken()) runSync(true); }, 5 * 60 * 1000);
-  setInterval(() => { renderTimeline(); renderLogs(); }, 60 * 1000);
+  setInterval(() => {
+    renderTimeline(); renderLogs();
+    // 電波待ちがあるときは1分ごとに再挑戦
+    if (pendingAI.length || !netOK) canReach().then(ok => { if (ok) { updateOfflineUI(); processPendingAI(); if (hasToken() && lsGet('pm_dirty')) runSync(false); } });
+  }, 60 * 1000);
 })();
 </script>
 </body>
