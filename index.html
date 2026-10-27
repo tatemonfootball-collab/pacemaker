@@ -141,6 +141,14 @@
     .q-about { font-size:11px; color:#6d28d9; font-weight:700; background:#f5f3ff; padding:3px 9px; border-radius:999px; display:inline-block; }
     .q-text { font-size:16px; font-weight:800; line-height:1.55; margin:8px 0 10px; word-break:break-word; }
     .q-wait { font-size:13px; color:var(--sub); font-weight:600; }
+    .memo { padding:10px 0; border-bottom:1px solid #f1f5f9; cursor:pointer; }
+    .memo:last-child { border-bottom:none; }
+    .memo-head { font-size:11px; font-weight:800; color:var(--sub); margin-bottom:4px; display:flex; gap:6px; align-items:center; }
+    .memo-wait { color:#b45309; background:#fffbeb; border:1px solid #fde68a; padding:1px 7px; border-radius:999px; font-size:10px; }
+    .memo-items { margin:0; padding-left:18px; }
+    .memo-items li { font-size:13px; margin:4px 0; line-height:1.6; word-break:break-word; }
+    .memo-items .log-time { min-width:0; margin-right:6px; }
+    .memo-raw { font-size:13px; color:#475569; white-space:pre-wrap; word-break:break-word; background:#f8fafc; border-radius:8px; padding:6px 9px; line-height:1.6; }
     .log-item { display:flex; gap:10px; padding:9px 0; border-bottom:1px solid #f1f5f9; cursor:pointer; align-items:center; }
     .log-item:last-child { border-bottom:none; }
     .log-time { font-size:12px; font-weight:800; color:#0f766e; min-width:96px; white-space:nowrap; }
@@ -234,10 +242,10 @@
           </div>
         </div>
 
-        <!-- 行動記録 -->
+        <!-- 行動メモ -->
         <div class="card">
           <div class="section-title">
-            <span>🕒 行動記録</span>
+            <span>🕒 行動メモ</span>
             <div class="date-nav">
               <button class="btn-j-action" onclick="shiftLogDate(-1)">◀</button>
               <span id="logDateLabel">今日</span>
@@ -245,14 +253,13 @@
             </div>
           </div>
           <div class="input-row">
-            <textarea id="logInput" rows="1" placeholder="例：10時から3組の採点した／今から部活"></textarea>
+            <textarea id="logInput" rows="2" placeholder="話すだけでOK（例：朝走って、学校着いてから採点してた）"></textarea>
             <button id="logMic" class="btn-mic" onclick="toggleMic('logInput','logMic')" title="音声入力">🎙️</button>
           </div>
-          <button id="logBtn" class="btn-send" style="background:#0f766e;" onclick="submitLog()">🕒 AIで行動を記録</button>
-          <div id="pendingLog"></div>
+          <button id="logBtn" class="btn-send" style="background:#0f766e;" onclick="submitLog()">🕒 話して記録</button>
           <div id="logSummary"></div>
           <div id="logList"></div>
-          <button class="btn-sub" onclick="openLogSheet('')">＋ 手で追加</button>
+          <button class="btn-sub" onclick="openMemoSheet('')">＋ 手で追加</button>
         </div>
 
         <details open>
@@ -379,7 +386,7 @@
         </div>
         <input type="file" id="importFile" accept=".json,application/json" style="display:none;" onchange="importFile(this)">
         <div class="hint" style="margin-top:6px;">「取り込み」はGAS版からの移行ファイル（pacemaker-export.json）やバックアップを読み込めます。</div>
-        <div class="hint" style="margin-top:10px; text-align:right;">AI PaceMaker v4.2</div>
+        <div class="hint" style="margin-top:10px; text-align:right;">AI PaceMaker v4.4</div>
       </div>
     </div>
   </div>
@@ -481,7 +488,7 @@ function showToast(msg, isErr) {
 // =====================================================
 function emptyDB() {
   return {
-    version: 1, tasks: [], journals: [], logs: [], aiQ: null,
+    version: 1, tasks: [], journals: [], logs: [], memos: [], aiQ: null,
     memory: { profile: DEFAULT_PROFILE, learned: '特になし', learnedAt: 0, updatedAt: 0 },
     timetable: { patterns: JSON.parse(JSON.stringify(DEFAULT_TT)), updatedAt: 0 },
     settings: { claudeKey: '', claudeModel: DEFAULT_MODEL, updatedAt: 0 }
@@ -495,6 +502,7 @@ function normalizeDB(d) {
     tasks: Array.isArray(d.tasks) ? d.tasks : [],
     journals: Array.isArray(d.journals) ? d.journals : [],
     logs: Array.isArray(d.logs) ? d.logs : [],
+    memos: Array.isArray(d.memos) ? d.memos : [],
     aiQ: d.aiQ || null,
     memory: d.memory || e.memory,
     timetable: d.timetable && d.timetable.patterns ? d.timetable : e.timetable,
@@ -524,6 +532,7 @@ function mergeDB(l, r) {
     tasks: mergeList(l.tasks, r.tasks),
     journals: mergeList(l.journals, r.journals),
     logs: mergeList(l.logs, r.logs),
+    memos: mergeList(l.memos, r.memos),
     aiQ: mergeObj(l.aiQ, r.aiQ),
     memory: mergeObj(l.memory, r.memory),
     timetable: mergeObj(l.timetable, r.timetable),
@@ -913,6 +922,7 @@ async function runSync(full) {
   try {
     const remote = await drivePull();
     if (remote) DB = mergeDB(DB, normalizeDB(remote));
+    migrateLogs();
     await pushPendingGoogle();
     if (full) await reconcileGoogle();
     saveLocal();
@@ -969,9 +979,21 @@ async function callClaude(system, user, maxTokens) {
   return (j.content || []).filter(c => c.type === 'text').map(c => c.text).join('');
 }
 function extractJson(s) {
+  s = String(s || '');
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const tries = [];
+  if (fence) tries.push(fence[1]);
   const a = s.indexOf('{'), b = s.lastIndexOf('}');
-  if (a < 0 || b < a) throw new Error('AIの返答を読み取れませんでした');
-  return JSON.parse(s.slice(a, b + 1));
+  const a2 = s.indexOf('['), b2 = s.lastIndexOf(']');
+  const obj = a >= 0 && b > a ? s.slice(a, b + 1) : null;
+  const arr = a2 >= 0 && b2 > a2 ? s.slice(a2, b2 + 1) : null;
+  // 先に出てくる方（[ か { か）を優先して読む
+  if (arr && (a < 0 || a2 < a)) { tries.push(arr); if (obj) tries.push(obj); }
+  else { if (obj) tries.push(obj); if (arr) tries.push(arr); }
+  for (const t of tries) { try { return JSON.parse(t); } catch (e) {} }
+  const err = new Error('AIの返答を読み取れませんでした。もう一度お試しください');
+  err.noLog = true;
+  throw err;
 }
 function memorySystem(role) {
   return `${role}
@@ -1309,14 +1331,26 @@ let pendingBusy = false;
 function savePending() { lsSet('pm_pendingAI', JSON.stringify(pendingAI)); renderPending(); }
 function queueAI(kind, text) { pendingAI.push({ id: uid(), kind, text, at: Date.now(), tries: 0 }); savePending(); }
 async function processPendingAI() {
-  if (pendingBusy || !pendingAI.length || looksOffline() || !(DB.settings.claudeKey || '').trim()) return;
+  if (pendingBusy || looksOffline() || !(DB.settings.claudeKey || '').trim()) return;
+  const memosP = liveMemos().filter(m => m.pending).sort((a, b) => a.at - b.at);
+  if (!pendingAI.length && !memosP.length) return;
   pendingBusy = true;
-  let done = 0;
+  let done = 0, netDown = false;
   try {
-    while (pendingAI.length) {
+    // 整理待ちの行動メモ
+    for (const m of memosP) {
+      try { await organizeMemo(m); done++; }
+      catch (e) {
+        if (isNet(e)) { netDown = true; break; }
+        m.tries = (m.tries || 0) + 1;
+        if (m.tries >= 3) { m.items = [{ text: m.raw, category: '#日常', start: '', end: '', ongoing: false }]; m.pending = false; }
+        touch(m); commit();
+      }
+    }
+    while (!netDown && pendingAI.length) {
       const it = pendingAI[0];
       try {
-        if (it.kind === 'log') await runLog(it.text, it.at); else await runSort(it.text, it.at);
+        await runSort(it.text, it.at);
         done++; pendingAI.shift(); savePending();
       } catch (e) {
         if (isNet(e)) break;
@@ -1342,9 +1376,8 @@ function renderPending() {
     const when = ymd(d) === todayStr() ? hm(d) : `${d.getMonth() + 1}/${d.getDate()} ${hm(d)}`;
     return `<div class="pend-item"><span class="pend-time">${when}</span><span style="flex:1; min-width:0; word-break:break-word;">${esc(p.text)}</span><button class="btn-restore" data-id="${esc(p.id)}" onclick="removePending(this.dataset.id)">✕</button></div>`;
   }).join('');
-  const s = mk('sort'), l = mk('log');
+  const s = mk('sort');
   $('pendingSort').innerHTML = s ? `<div class="pend-box"><div class="pend-head">⏳ 電波待ち ― つながったら自動でAIが仕分けます</div>${s}</div>` : '';
-  $('pendingLog').innerHTML = l ? `<div class="pend-box"><div class="pend-head">⏳ 電波待ち ― つながったら入力した時刻で記録します</div>${l}</div>` : '';
 }
 
 async function submitVoice() {
@@ -1396,12 +1429,12 @@ async function runSort(text, at) {
    - execTime: 実行時刻の指定があれば "HH:mm"、なければ ""
 3. events: 会議・来客・出張・面談など「日時が明確に決まっている予定」の配列
    - title, startTime, endTime（ISO形式 例: 2026-10-25T15:30:00+09:00。終了不明なら開始の1時間後）
-4. logs: 「実際にやった・今やっている行動」の行動記録の配列（これからの予定はeventsへ、やるべきことはtasksへ）
-${LOG_RULES}
-   行動記録にした内容はjournalに重複させない（感想や気づきがあればjournalへ）。
+4. logs: 「実際にやった・今やっている行動」の行動メモの配列（これからの予定はeventsへ、やるべきことはtasksへ）
+${MEMO_RULES}
+   行動メモにした内容はjournalに重複させない（考えたことや振り返りはjournalへ）。
 
 【出力JSONフォーマット（厳守・JSON以外は書かない）】
-{"journal":{"content":"","tags":["#タグ"]},"tasks":[{"title":"","category":"#教務","importance":4,"urgency":5,"duration":30,"deadline":"","recurrence":"","execTime":""}],"events":[{"title":"","startTime":"","endTime":""}],"logs":[{"date":"","start":"","end":"","text":"","category":""}],"aiMessage":"整理して登録しました！（2文以内）"}
+{"journal":{"content":"","tags":["#タグ"]},"tasks":[{"title":"","category":"#教務","importance":4,"urgency":5,"duration":30,"deadline":"","recurrence":"","execTime":""}],"events":[{"title":"","startTime":"","endTime":""}],"logs":[{"text":"","category":"","start":"","end":"","ongoing":false}],"aiMessage":"整理して登録しました！（2文以内）"}
 
 【入力テキスト】
 ${text}`;
@@ -1432,10 +1465,12 @@ ${text}`;
       if (!hasToken()) { evFail++; continue; }
       try { await createCalEvent(ev.title || '予定', s, end); evCount++; } catch (err) { evFail++; console.warn(err); }
     }
-    const logCount = addLogs(out.logs, at);
+    const memoItems = normItems(out.logs);
+    if (memoItems.length) addMemo({ raw: '', items: memoItems, at });
+    const logCount = memoItems.length;
     commit();
     if (evCount && hasToken()) loadTimeline().then(renderTimeline).catch(() => {});
-    return `🤖 ${out.aiMessage || '登録しました！'}\n（タスク ${tasks.length}件 / カレンダー ${evCount}件${logCount ? ` / 行動記録 ${logCount}件` : ''}${evFail ? ` / 未登録 ${evFail}件（Google未接続）` : ''}）`;
+    return `🤖 ${out.aiMessage || '登録しました！'}\n（タスク ${tasks.length}件 / カレンダー ${evCount}件${logCount ? ` / 行動メモ ${logCount}件` : ''}${evFail ? ` / 未登録 ${evFail}件（Google未接続）` : ''}）`;
 }
 
 // ---- AIに相談 ----
@@ -1656,93 +1691,152 @@ function answerQuestion() {
 }
 
 // =====================================================
-// 行動記録
+// 行動メモ（話すだけでOK。AIが箇条書きに整理し、時刻が出てきたものだけ時間帯として扱う）
 // =====================================================
-const LOG_RULES = `   - 各要素: date(YYYY-MM-DD), start("HH:mm"), end("HH:mm" または進行中なら ""), text(行動を簡潔に。20字以内), category(タグ1つ。例 #教務 #数学 #部活 #マラソン #日常)
-   - 「〜した」で時刻が分からない → end=現在時刻、start=内容から妥当な所要時間を推定して逆算
-   - 「〜分やった」 → end=現在時刻から逆算。「〜時から〜時まで」 → そのまま
-   - 「今から〜」「〜している」 → start=現在時刻（指定があればその時刻）、end=""
-   - 「昨日」などは date を変える。未来の行動は含めない`;
+const MEMO_RULES = `   - 各要素: {"text","category","start","end","ongoing"}
+     - text: 1項目の要点（30字以内。話し言葉を読みやすく整える）
+     - category: タグ1つ（例 #教務 #数学 #部活 #マラソン #日常）
+     - start / end: 話の中に時刻が出てきた、または「今から」「さっき30分」のようにはっきり分かるときだけ "HH:mm"（24時間表記）。分からなければ ""（推測で埋めない）
+     - ongoing: 「今から〜」「〜している」のように今まさに続いている行動だけ true（start=現在時刻、end=""）
+   - 行動だけでなく、そのときの感想・気づき・様子も1項目にしてよい
+   - これからの予定・やるべきことは含めない`;
+
+// AIの返す時刻のゆれ（"6:30" "06:30:00" "6時半" "午後3時" "2026-10-28T06:30" など）を "HH:mm" にそろえる
+function parseTimeLoose(v) {
+  let s = String(v == null ? '' : v).trim();
+  if (!s) return '';
+  s = s.replace(/[０-９：]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+  const iso = s.match(/T(\d{1,2}):(\d{2})/);
+  if (iso) s = `${iso[1]}:${iso[2]}`;
+  let m = s.match(/(\d{1,2}):(\d{2})/);
+  let h, mi;
+  if (m) { h = +m[1]; mi = +m[2]; }
+  else if ((m = s.match(/(\d{1,2})\s*時\s*(半|(\d{1,2})\s*分?)?/))) { h = +m[1]; mi = m[2] === '半' ? 30 : (m[3] ? +m[3] : 0); }
+  else if ((m = s.match(/^(\d{1,2})(\d{2})$/))) { h = +m[1]; mi = +m[2]; }
+  else return '';
+  if (/午後|PM|pm/.test(s) && h < 12) h += 12;
+  if (h > 23 || mi > 59) return '';
+  return `${pad(h)}:${pad(mi)}`;
+}
+const toMinT = s => { const [h, m] = String(s).split(':').map(Number); return h * 60 + m; };
+const fmtMin = m => m >= 60 ? `${Math.floor(m / 60)}時間${m % 60 ? (m % 60) + '分' : ''}` : `${m}分`;
+
 let logDate = todayStr();
-const dayLogs = d => DB.logs.filter(l => !l.deleted && l.date === d).sort((a, b) => String(a.start).localeCompare(String(b.start)));
-function logMinutes(l) {
-  const toMin = s => { const [h, m] = String(s).split(':').map(Number); return h * 60 + m; };
-  if (!l.start) return 0;
-  if (l.end) return Math.max(0, toMin(l.end) - toMin(l.start));
-  if (l.date === todayStr()) return Math.max(0, toMin(hm(new Date())) - toMin(l.start));
+const liveMemos = () => (DB.memos || []).filter(m => !m.deleted);
+const dayMemos = d => liveMemos().filter(m => m.date === d).sort((a, b) => (a.at || 0) - (b.at || 0));
+function itemMinutes(it, date) {
+  if (!it.start) return 0;
+  if (it.end) return Math.max(0, toMinT(it.end) - toMinT(it.start));
+  if (it.ongoing && date === todayStr()) return Math.max(0, toMinT(hm(new Date())) - toMinT(it.start));
   return 0;
 }
-const fmtMin = m => m >= 60 ? `${Math.floor(m / 60)}時間${m % 60 ? (m % 60) + '分' : ''}` : `${m}分`;
-function logLines(d) { return dayLogs(d).map(l => `${fmtMD(d)} ${l.start}〜${l.end || '進行中'} ${l.text} ${l.category || ''}`).join('\n'); }
-
-function addLogs(list, at) {
-  if (!Array.isArray(list)) return 0;
-  let n = 0;
-  const now = Date.now();
-  const baseDate = ymd(new Date(at || now));
-  list.forEach(x => {
-    if (!x || !x.text) return;
-    const fixT = s => /^\d{1,2}:\d{2}$/.test(String(s || '').trim()) ? String(s).trim().padStart(5, '0') : '';
-    const start = fixT(x.start); if (!start) return;
-    let end = fixT(x.end);
-    if (end && end < start) end = '';
-    const date = /^\d{4}-\d{2}-\d{2}$/.test(x.date || '') ? x.date : baseDate;
-    if (!end) {
-      // 新しく始めたら、それより前に始まった進行中の記録は終了させる
-      dayLogs(date).filter(o => !o.end && o.start <= start).forEach(o => { o.end = start; touch(o); });
-    }
-    DB.logs.push({ id: uid(), date, start, end, text: String(x.text).trim(), category: normTag(x.category).split(' ')[0], createdAt: now, updatedAt: now });
-    logDate = date;
-    n++;
+const itemTime = i => i.start ? `${i.start}${i.end ? '〜' + i.end : (i.ongoing ? '〜進行中' : '')} ` : '';
+function logLines(d, exceptId) {
+  return dayMemos(d).filter(m => m.id !== exceptId).map(m =>
+    `${hm(new Date(m.at))}のメモ: ` + ((m.items && m.items.length) ? m.items.map(i => itemTime(i) + i.text).join(' / ') : m.raw)).join('\n');
+}
+function normItems(list) {
+  if (list && !Array.isArray(list)) list = [list];
+  return (list || []).map(x => {
+    if (!x) return null;
+    const text = String(x.text || x.title || x.activity || x.note || '').trim();
+    if (!text) return null;
+    const start = parseTimeLoose(x.start || x.startTime);
+    let end = start ? parseTimeLoose(x.end || x.endTime) : '';
+    if (end && end <= start) end = '';
+    return { text, category: normTag(x.category).split(' ')[0], start, end, ongoing: !!(x.ongoing && start && !end) };
+  }).filter(Boolean);
+}
+// 新しく時刻つきの行動が入ったら、それより前に始まった「進行中」を終わらせる
+function applyAutoClose(m) {
+  const starts = (m.items || []).filter(i => i.start).map(i => i.start).sort();
+  if (!starts.length) return;
+  const t = starts[0];
+  dayMemos(m.date).forEach(o => {
+    if (o.id === m.id) return;
+    let ch = false;
+    (o.items || []).forEach(i => { if (i.ongoing && !i.end && i.start && i.start <= t) { i.end = t; i.ongoing = false; ch = true; } });
+    if (ch) touch(o);
   });
-  return n;
+}
+function addMemo({ raw, items, at, pending }) {
+  const now = Date.now();
+  at = at || now;
+  const m = { id: uid(), date: ymd(new Date(at)), at, raw: raw || '', items: items || [], pending: !!pending, createdAt: now, updatedAt: now };
+  applyAutoClose(m);
+  DB.memos.push(m);
+  logDate = m.date;
+  return m;
+}
+// 旧形式の行動記録（v4.1〜4.3）を行動メモに移す
+function migrateLogs() {
+  let changed = false;
+  (DB.logs || []).forEach(l => {
+    if (l.deleted) return;
+    const mid = 'm_' + l.id;
+    if (!DB.memos.some(m => m.id === mid)) {
+      const at = Date.parse(`${l.date}T${l.start || '12:00'}`) || l.createdAt || Date.now();
+      DB.memos.push({ id: mid, date: l.date, at, raw: '', items: [{ text: l.text, category: l.category || '#日常', start: l.start || '', end: l.end || '', ongoing: !!(l.start && !l.end) }], pending: false, createdAt: l.createdAt || Date.now(), updatedAt: Date.now() });
+    }
+    l.deleted = true; touch(l); changed = true;
+  });
+  // 電波待ちだった旧形式の入力も行動メモにする
+  const old = pendingAI.filter(p => p.kind === 'log');
+  if (old.length) {
+    old.forEach(p => addMemo({ raw: p.text, at: p.at, pending: true }));
+    pendingAI = pendingAI.filter(p => p.kind !== 'log');
+    lsSet('pm_pendingAI', JSON.stringify(pendingAI));
+    changed = true;
+  }
+  return changed;
+}
+
+async function organizeMemo(m) {
+  const sys = memorySystem('あなたはユーザーの行動メモ係です。必ずJSONのみを出力します。');
+  const user = `話した日時: ${nowLabel(m.at)}
+この日のこれまでのメモ:
+${logLines(m.date, m.id) || '（まだなし）'}
+
+次の【話した内容】を、行動メモとして箇条書きに整理してください。
+${MEMO_RULES}
+出力（JSONのみ）: {"items":[{"text":"","category":"","start":"","end":"","ongoing":false}],"message":"ひとこと（30字以内）"}
+
+【話した内容】
+${m.raw}`;
+  const out = extractJson(await callClaude(sys, user, 1200));
+  const items = normItems(Array.isArray(out) ? out : (out.items || out.logs || out.memo || []));
+  // AIが整理できなかったときも、話した内容はそのまま1項目として残す
+  m.items = items.length ? items : [{ text: m.raw, category: '#日常', start: '', end: '', ongoing: false }];
+  m.pending = false; touch(m);
+  applyAutoClose(m);
+  commit();
+  return (out && out.message) || '整理して記録しました';
 }
 async function submitLog() {
   if (rec) rec.stop();
   const el = $('logInput');
   const text = el.value.trim();
   if (!text) return;
-  if (!(DB.settings.claudeKey || '').trim()) {
-    addLogs([{ date: todayStr(), start: hm(new Date()), end: '', text, category: '#日常' }]);
-    el.value = ''; showToast('🕒 今から「' + text + '」として記録しました'); commit(); return;
-  }
-  if (looksOffline()) {
-    queueAI('log', text); el.value = '';
-    showToast('📴 オフラインなので保存しました。電波が戻ったら今の時刻で記録します');
-    return;
-  }
+  const hasKey = !!(DB.settings.claudeKey || '').trim();
+  // まず話した内容をそのまま保存（電波がなくても、AIが失敗しても消えない）
+  const m = addMemo({ raw: text, items: hasKey ? [] : [{ text, category: '#日常', start: '', end: '', ongoing: false }], pending: hasKey });
+  el.value = '';
+  commit();
+  if (!hasKey) { showToast('🕒 記録しました'); return; }
+  if (looksOffline()) { showToast('📴 記録しました。電波が戻ったらAIが整理します'); return; }
   const btn = $('logBtn');
-  btn.disabled = true; btn.textContent = '🧠 記録中…';
-  try {
-    const msg = await runLog(text, Date.now());
-    el.value = '';
-    showToast('🕒 ' + msg);
-  } catch (e) {
-    if (isNet(e)) {
-      queueAI('log', text); el.value = '';
-      showToast('📴 電波が弱いので保存しました。つながったら今の時刻で記録します');
-    } else showToast(e.message, true);
-  }
-  finally { btn.disabled = false; btn.textContent = '🕒 AIで行動を記録'; }
+  btn.disabled = true; btn.textContent = '🧠 整理中…';
+  try { showToast('🕒 ' + await organizeMemo(m)); }
+  catch (e) { showToast(isNet(e) ? '📴 記録しました。電波が戻ったらAIが整理します' : '🕒 記録しました（AIの整理はあとで自動でやり直します）'); }
+  finally { btn.disabled = false; btn.textContent = '🕒 話して記録'; }
 }
-async function runLog(text, at) {
-    const sys = memorySystem('あなたはユーザーの行動記録係です。必ずJSONのみを出力します。');
-    const day = ymd(new Date(at));
-    const user = `現在日時: ${nowLabel(at)}
-今日のこれまでの行動記録:
-${logLines(day) || '（まだなし）'}
-
-次の【入力】から行動記録を抽出してください。
-${LOG_RULES}
-出力（JSONのみ）: {"logs":[{"date":"","start":"","end":"","text":"","category":""}],"message":"ひとこと（30字以内）"}
-
-【入力】
-${text}`;
-    const out = extractJson(await callClaude(sys, user, 800));
-    const n = addLogs(out.logs, at);
-    if (!n) throw new Error('行動として読み取れませんでした。「10時から採点した」のように書いてみてください');
-    commit();
-    return out.message || `${n}件記録しました`;
+async function reorganizeMemo(id) {
+  const m = DB.memos.find(x => x.id === id); if (!m || !m.raw) return;
+  closeSheet();
+  if (looksOffline()) { showToast('📴 オフラインです。電波が戻ったら整理し直します'); m.pending = true; touch(m); commit(); return; }
+  m.pending = true; touch(m); renderLogs();
+  try { showToast('🕒 ' + await organizeMemo(m)); }
+  catch (e) { m.pending = false; touch(m); commit(); showToast(e.message, true); }
 }
 function shiftLogDate(n) {
   const d = parseYmd(logDate); d.setDate(d.getDate() + n);
@@ -1756,71 +1850,85 @@ function renderLogs() {
   const d = parseYmd(logDate);
   $('logDateLabel').textContent = logDate === today ? '今日' : `${d.getMonth() + 1}/${d.getDate()}(${WD[d.getDay()]})`;
   $('logNextBtn').style.visibility = logDate === today ? 'hidden' : 'visible';
-  const list = dayLogs(logDate);
+  const list = dayMemos(logDate);
   if (!list.length) {
     $('logSummary').innerHTML = '';
-    $('logList').innerHTML = `<div class="hint" style="padding:10px 0;">${logDate === today ? 'まだ記録はありません。「10時から3組の採点をした」「今から部活」のように話しかけてください。' : 'この日の記録はありません。'}</div>`;
+    $('logList').innerHTML = `<div class="hint" style="padding:10px 0;">${logDate === today ? 'まだ記録はありません。思いついたときに話すだけでOKです（例：「朝走って、学校着いてから採点してた」）。' : 'この日の記録はありません。'}</div>`;
     return;
   }
   const byCat = {};
   let total = 0;
-  list.forEach(l => { const m = logMinutes(l); total += m; byCat[l.category || '#日常'] = (byCat[l.category || '#日常'] || 0) + m; });
-  $('logSummary').innerHTML = `<div class="log-sum"><span class="mini-badge" style="background:#0f766e; color:#fff;">合計 ${fmtMin(total)}</span>${Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([c, m]) => `<span class="mini-badge" style="color:#0f766e; background:#f0fdfa;">${esc(c)} ${fmtMin(m)}</span>`).join('')}</div>`;
-  $('logList').innerHTML = list.map(l => `
-    <div class="log-item" data-id="${esc(l.id)}" onclick="openLogSheet(this.dataset.id)">
-      <div class="log-time">${esc(l.start)}〜${l.end ? esc(l.end) : '<span class="log-live">進行中</span>'}</div>
-      <div style="flex:1; min-width:0;">
-        <div style="font-weight:700; font-size:13px; word-break:break-word;">${esc(l.text)}</div>
-        <div class="mini-badges"><span class="mini-badge" style="color:#0f766e; background:#f0fdfa;">${esc(l.category || '#日常')}</span><span class="mini-badge">${fmtMin(logMinutes(l))}</span></div>
-      </div>
-      ${!l.end && l.date === today ? `<button class="btn-mini" onclick="event.stopPropagation();endLog(this.closest('[data-id]').dataset.id)">■ 終了</button>` : ''}
-    </div>`).join('');
+  list.forEach(m => (m.items || []).forEach(i => { const mm = itemMinutes(i, m.date); if (mm) { total += mm; byCat[i.category || '#日常'] = (byCat[i.category || '#日常'] || 0) + mm; } }));
+  $('logSummary').innerHTML = total ? `<div class="log-sum"><span class="mini-badge" style="background:#0f766e; color:#fff;">時刻のある記録 ${fmtMin(total)}</span>${Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([c, mm]) => `<span class="mini-badge" style="color:#0f766e; background:#f0fdfa;">${esc(c)} ${fmtMin(mm)}</span>`).join('')}</div>` : '';
+  $('logList').innerHTML = list.slice().reverse().map(m => {
+    const body = (m.pending || !(m.items || []).length)
+      ? `<div class="memo-raw">${esc(m.raw)}</div>`
+      : `<ul class="memo-items">${m.items.map((i, idx) => `<li>${i.start ? `<span class="log-time">${esc(i.start)}${i.end ? '〜' + esc(i.end) : (i.ongoing ? '〜<span class="log-live">進行中</span>' : '')}</span>` : ''}<span>${esc(i.text)}</span> <span class="mini-badge" style="color:#0f766e; background:#f0fdfa;">${esc(i.category || '#日常')}</span>${i.start && i.end ? ` <span class="mini-badge">${fmtMin(itemMinutes(i, m.date))}</span>` : ''}${i.ongoing && !i.end && m.date === today ? ` <button class="btn-mini" style="padding:3px 8px;" onclick="event.stopPropagation();endItem('${esc(m.id)}',${idx})">■ 終了</button>` : ''}</li>`).join('')}</ul>`;
+    return `<div class="memo" data-id="${esc(m.id)}" onclick="openMemoSheet(this.dataset.id)">
+      <div class="memo-head">🗣️ ${hm(new Date(m.at))} のメモ${m.pending ? '<span class="memo-wait">⏳ AI整理待ち</span>' : ''}<span style="margin-left:auto; color:var(--primary);">✏️</span></div>
+      ${body}
+    </div>`;
+  }).join('');
 }
-function endLog(id) {
-  const l = DB.logs.find(x => x.id === id); if (!l) return;
-  l.end = hm(new Date()); touch(l);
-  showToast(`✓ 「${l.text}」を終了（${fmtMin(logMinutes(l))}）`);
+function endItem(mid, idx) {
+  const m = DB.memos.find(x => x.id === mid); if (!m || !m.items[idx]) return;
+  const i = m.items[idx];
+  i.end = hm(new Date()); i.ongoing = false; touch(m);
+  showToast(`✓ 「${i.text}」を終了（${fmtMin(itemMinutes(i, m.date))}）`);
   commit();
 }
-function openLogSheet(id) {
-  const l = id ? DB.logs.find(x => x.id === id) : null;
-  const v = l || { date: logDate, start: hm(new Date()), end: '', text: '', category: '#日常' };
-  const cats = Array.from(new Set([...PRESET_TAGS, ...DB.logs.filter(x => !x.deleted).map(x => x.category).filter(Boolean)]));
+const itemToLine = i => `${i.start ? i.start + (i.end ? '-' + i.end : (i.ongoing ? '-' : '')) + ' ' : ''}${i.text} ${i.category || '#日常'}`;
+function parseMemoLine(line) {
+  let s = String(line || '').trim().replace(/^[・*]\s*/, '');
+  if (!s) return null;
+  s = s.replace(/[０-９：]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+  let start = '', end = '', ongoing = false;
+  const m = s.match(/^(\d{1,2}:\d{2})(\s*[-〜~–]\s*(\d{1,2}:\d{2})?)?\s*/);
+  if (m) { start = parseTimeLoose(m[1]); if (m[2]) { if (m[3]) end = parseTimeLoose(m[3]); else ongoing = true; } s = s.slice(m[0].length); }
+  const tags = s.match(/#\S+/g) || [];
+  const text = s.replace(/#\S+/g, '').trim();
+  if (!text) return null;
+  if (end && end <= start) end = '';
+  return { text, category: tags[0] || '#日常', start, end, ongoing: ongoing && !end };
+}
+function openMemoSheet(id) {
+  const m = id ? DB.memos.find(x => x.id === id) : null;
+  const hasKey = !!(DB.settings.claudeKey || '').trim();
+  const lines = m ? ((m.items && m.items.length) ? m.items.map(itemToLine).join('\n') : m.raw) : '';
   openSheet(`
-    <h3>${l ? '✏️ 行動記録を修正' : '＋ 行動記録を追加'}</h3>
-    <div class="form-row"><label>やったこと</label><input type="text" id="lgText" value="${esc(v.text)}" placeholder="例：3組の採点"></div>
-    <div class="form-row"><label>タグ</label><input type="text" id="lgCat" list="lgCatList" value="${esc(v.category || '#日常')}">
-      <datalist id="lgCatList">${cats.map(c => `<option value="${esc(c)}">`).join('')}</datalist></div>
-    <div class="form-row"><label>日付</label><input type="date" id="lgDate" value="${esc(v.date)}" max="${todayStr()}"></div>
-    <div style="display:flex; gap:8px;">
-      <div class="form-row" style="flex:1;"><label>開始</label><input type="time" id="lgStart" value="${esc(v.start)}"></div>
-      <div class="form-row" style="flex:1;"><label>終了（空欄＝進行中）</label><input type="time" id="lgEnd" value="${esc(v.end)}"></div>
+    <h3>${m ? `✏️ ${hm(new Date(m.at))} のメモ` : '＋ 行動メモを手で追加'}</h3>
+    ${m && m.raw ? `<div class="form-row"><label>話した内容（元の文）</label><div class="memo-raw">${esc(m.raw)}</div></div>` : ''}
+    <div class="form-row"><label>整理した内容（1行に1項目）</label>
+      <textarea id="memoLines" rows="6" placeholder="例：\n06:00-06:30 5kmラン #マラソン\n3組の採点 #数学\n脚は軽かった">${esc(lines)}</textarea>
+      <div class="hint" style="margin-top:4px;">時刻は行の先頭に「06:00-06:30」（進行中は「09:45-」）と書けます。なくてもOK。#タグも付けられます。</div>
     </div>
-    <button class="btn-send" style="background:#0f766e;" onclick="saveLogSheet('${l ? esc(l.id) : ''}')">✓ 保存</button>
+    <div class="form-row"><label>日付</label><input type="date" id="memoDate" value="${esc(m ? m.date : logDate)}" max="${todayStr()}"></div>
+    <button class="btn-send" style="background:#0f766e;" onclick="saveMemoSheet('${m ? esc(m.id) : ''}')">✓ 保存</button>
+    ${m && m.raw && hasKey ? `<button class="btn-sub" onclick="reorganizeMemo('${esc(m.id)}')">🤖 AIで整理し直す</button>` : ''}
     <div class="btn-row">
-      ${l ? `<button class="btn-danger" onclick="deleteLog('${esc(l.id)}')">🗑️ 削除</button>` : ''}
+      ${m ? `<button class="btn-danger" onclick="deleteMemo('${esc(m.id)}')">🗑️ 削除</button>` : ''}
       <button class="btn-sub" onclick="closeSheet()">閉じる</button>
     </div>`);
 }
-function saveLogSheet(id) {
-  const text = $('lgText').value.trim(), start = $('lgStart').value, end = $('lgEnd').value, date = $('lgDate').value || todayStr();
-  if (!text || !start) { alert('やったことと開始時刻を入力してください'); return; }
-  if (end && end <= start) { alert('終了時刻は開始時刻より後にしてください'); return; }
-  const category = normTag($('lgCat').value).split(' ')[0];
+function saveMemoSheet(id) {
+  const items = $('memoLines').value.split('\n').map(parseMemoLine).filter(Boolean);
+  if (!items.length) { alert('1項目以上入力してください'); return; }
+  const date = $('memoDate').value || todayStr();
   if (id) {
-    const l = DB.logs.find(x => x.id === id); if (!l) return;
-    Object.assign(l, { text, start, end, date, category }); touch(l);
+    const m = DB.memos.find(x => x.id === id); if (!m) return;
+    if (m.date !== date) { m.date = date; m.at = Date.parse(`${date}T${hm(new Date(m.at))}`) || m.at; }
+    m.items = items; m.pending = false; touch(m);
+    applyAutoClose(m);
   } else {
-    const now = Date.now();
-    DB.logs.push({ id: uid(), date, start, end, text, category, createdAt: now, updatedAt: now });
+    addMemo({ raw: '', items, at: date === todayStr() ? Date.now() : (Date.parse(`${date}T${hm(new Date())}`) || Date.now()) });
   }
   logDate = date;
   closeSheet(); showToast('✓ 保存しました'); commit();
 }
-function deleteLog(id) {
-  const l = DB.logs.find(x => x.id === id); if (!l) return;
-  if (!confirm(`「${l.text}」の記録を削除しますか？`)) return;
-  l.deleted = true; touch(l);
+function deleteMemo(id) {
+  const m = DB.memos.find(x => x.id === id); if (!m) return;
+  if (!confirm('このメモを削除しますか？')) return;
+  m.deleted = true; touch(m);
   closeSheet(); commit();
 }
 
@@ -2141,6 +2249,7 @@ function switchTab(tab) {
   $('singleEvDate').value = todayStr();
 
   const justLoggedIn = handleAuthRedirect();
+  if (migrateLogs()) saveLocal();
   render();
 
   if ('serviceWorker' in navigator && window.isSecureContext) {
